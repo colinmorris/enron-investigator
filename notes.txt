@@ -1,0 +1,59 @@
+Overview of process:
+    - Load the tokens in all e-mails into an in-memory trie (indexbuilder.PrefixTreeBuilder.load_directory)
+    - Save that trie to a file in a careful way using a particular binary format
+        described below. Importantly, each record contains its own length, and the
+        indices to its children in the file.
+    - Load the root of that trie.
+    - Given a particular prefix, find the subtree rooted at that prefix, and
+        traverse it, finding all words.
+
+
+Nodes are stored as follows:
+
+<record-size><char><is-terminal><child>*
+
+<record-size> : The size of the record in bytes. A 4-byte integer.
+<char> : The character at this node. One byte. (please god don't make me do unicode). Not meaningful if this is the root.
+<is-terminal> : 't' if this is a terminal node (NOT necessarily a leaf - but may be the terminus of a word), 'f' otherwise
+<child> : A 4-byte integer representing the offset into the index file at which this node's record is found.
+    A node may have 0 to many children.
+
+The root is special. It is always the first record in the file, and looks like:
+
+<record-size><child>*\0
+
+(That is, as above, but without the first two bytes)
+
+# XXX: Design decision - do we want to store the character along with the pointer to the child?
+Better in terms of time (don't have to fetch unneeded nodes when looking to go down the
+tree along a specific path), but worse in terms of space.
+
+
+Ways I would refactor:
+    - Probably easier to store char as '' for the root rather than None
+        (makes suggest_words('') work as expected)
+
+    - PrefixTreeBuilder is kind of a dumb name.
+    - Loading lots of files takes a long time. In practice maybe this wouldn't be a big deal
+        (since it would happen offline), but it would be nice to optimize this. (e.g. maybe
+        the overhead of a function call for every character is insane).
+        - Maybe also truncate words. Nothing longer than, say, 16 characters is going to
+        be useful.
+    - A lot of the tree is taken up with numbers, which aren't very interesting. Maybe
+    filter those out.
+
+Things I would add:
+    - Use optparse to parse command line arguments, and to add a verbosity option to
+        set logging level
+
+
+
+Retrieving documents by word:
+    - For each terminal node in the trie, we could store an array of ids of documents
+    that contain that word. But this would increase the size of each terminal node by up
+    to ~#docs*4 bytes, which is probably not acceptable for hundreds of thousands of
+    e-mails.
+        - Since our interface probably only needs to (and only *can*) display the first dozen or
+        so documents for each word, we could just store that many. (Then maybe the interface
+        could offer some 'load more...' option, which would load additional documents the
+        hard way.
